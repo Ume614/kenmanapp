@@ -1,0 +1,1353 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>検針アプリシステム - Gemini API搭載版</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+        body {
+            font-family: 'Inter', 'Noto Sans JP', sans-serif;
+        }
+        :root {
+            --key-color: #aa0000;
+            --key-color-dark: #880000;
+            --key-color-light: #d57a7a;
+            --key-color-extralight: #fde8e8;
+            --key-color-border: #f8c5c5;
+        }
+        @media print {
+            .no-print { display: none !important; }
+            body { height: auto !important; overflow: visible !important; }
+            .container { max-width: none !important; }
+        }
+        .camera-preview {
+            width: 100%;
+            max-width: 400px;
+            height: 300px;
+            background: #f3f4f6;
+            border: 2px dashed #d1d5db;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            overflow: hidden;
+        }
+        .camera-preview img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .meter-image {
+            max-width: 100%;
+            max-height: 200px;
+            object-fit: contain;
+        }
+        .large-text { font-size: 1.1rem; }
+        .extra-large-text { font-size: 1.5rem; }
+        .chart-container { 
+            height: 400px; 
+            position: relative;
+        }
+        .modal-overlay {
+            backdrop-filter: blur(4px);
+        }
+        .step-indicator {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 2rem;
+            align-items: flex-start;
+        }
+        .step-indicator .step {
+            flex: 1;
+            text-align: center;
+            position: relative;
+        }
+        .step-indicator .step .line {
+            position: absolute;
+            top: 16px; /* Vertically center with the circle */
+            left: 50%;
+            width: 100%;
+            height: 4px;
+            background: #e5e7eb;
+            z-index: 1;
+        }
+        .step-indicator .step:first-child .line {
+            left: 50%;
+            width: 50%;
+        }
+        .step-indicator .step:last-child .line {
+            display: none;
+        }
+        .step-indicator .step .circle {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 0.5rem;
+            font-weight: bold;
+            position: relative;
+            z-index: 2;
+            transition: all 0.3s ease;
+            background: #e5e7eb;
+            color: #6b7280;
+            border: 4px solid #e5e7eb;
+        }
+        .step-indicator .step.active .circle {
+            background: var(--key-color);
+            color: white;
+            border-color: var(--key-color-light);
+        }
+        .step-indicator .step.completed .circle {
+            background: #10b981;
+            color: white;
+            border-color: #a7f3d0;
+        }
+        .step-indicator .step.completed .line {
+            background: #10b981;
+        }
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        .data-table {
+            overflow-x: auto;
+            max-height: 500px;
+        }
+        .history-item {
+            transition: all 0.3s ease;
+        }
+        .history-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+        .status-synced {
+            background-color: #d1fae5;
+            color: #065f46;
+        }
+        .status-pending {
+            background-color: #fef3c7;
+            color: #92400e;
+        }
+        .alert-item {
+            background-color: #fef2f2;
+            border-left: 4px solid #ef4444;
+        }
+        .success-animation {
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+        .loading-spinner {
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .fade-in {
+            animation: fadeIn 0.5s ease-in;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .slide-in {
+            animation: slideIn 0.3s ease-out;
+        }
+        @keyframes slideIn {
+            from { transform: translateX(-100%); }
+            to { transform: translateX(0); }
+        }
+        .progress-bar {
+            height: 6px;
+            background: #e5e7eb;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 1rem;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--key-color), #10b981);
+            transition: width 0.4s ease;
+        }
+        .metric-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            position: relative;
+            overflow: hidden;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        .metric-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.15);
+        }
+        .metric-card::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
+            animation: shimmer 4s infinite linear;
+        }
+        @keyframes shimmer {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 1rem 1.5rem;
+            border-radius: 8px;
+            color: white;
+            font-weight: 600;
+            z-index: 1050;
+            transform: translateX(calc(100% + 20px));
+            transition: transform 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+        .notification.show {
+            transform: translateX(0);
+        }
+        .notification.success { background: #10b981; }
+        .notification.error { background: #ef4444; }
+        .notification.info { background: var(--key-color); }
+        .ocr-result-animation {
+            animation: resultAppear 0.8s ease-out;
+        }
+        @keyframes resultAppear {
+            0% { opacity: 0; transform: scale(0.8); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+        .camera-controls {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            margin-top: 1rem;
+        }
+        .tenant-card {
+            border: 2px solid #e5e7eb;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        .tenant-card:hover {
+            border-color: var(--key-color);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(170, 0, 0, 0.15);
+        }
+        .tenant-card.selected {
+            border-color: #10b981;
+            background: #f0fdf4;
+            box-shadow: 0 8px 25px rgba(16, 185, 129, 0.15);
+        }
+        .btn-primary {
+            background-color: var(--key-color);
+            color: white;
+        }
+        .btn-primary:hover {
+            background-color: var(--key-color-dark);
+        }
+        .btn-primary-gradient {
+            background: linear-gradient(to right, var(--key-color), var(--key-color-dark));
+            color: white;
+        }
+        .btn-primary-gradient:hover {
+            background: linear-gradient(to right, var(--key-color-dark), #660000);
+        }
+        .text-key-color { color: var(--key-color); }
+        .focus-key-color:focus {
+            --tw-ring-color: var(--key-color);
+            border-color: var(--key-color);
+        }
+        .report-modal-content {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- Header -->
+    <header class="text-white p-4 shadow-lg no-print btn-primary-gradient">
+        <div class="container mx-auto flex justify-between items-center">
+            <div class="flex items-center space-x-4">
+                <i class="fas fa-bolt text-3xl"></i>
+                <h1 class="text-2xl font-bold">電力メーター検針システム</h1>
+            </div>
+            <div class="flex items-center space-x-4">
+                <div id="userInfo" class="hidden text-sm items-center">
+                    <i class="fas fa-user-circle mr-2 text-xl"></i>
+                    <span id="currentUserName" class="font-semibold"></span>
+                </div>
+                <button id="loginBtn" class="bg-white hover:bg-gray-200 font-bold px-4 py-2 rounded-lg large-text transition-colors text-key-color">
+                    <i class="fas fa-sign-in-alt mr-2"></i>ログイン
+                </button>
+                <button id="logoutBtn" class="bg-red-500 hover:bg-red-700 px-4 py-2 rounded-lg large-text hidden transition-colors text-white">
+                    <i class="fas fa-sign-out-alt mr-2"></i>ログアウト
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Login Modal -->
+    <div id="loginModal" class="fixed inset-0 bg-black bg-opacity-50 modal-overlay z-50 hidden no-print">
+        <div class="flex items-center justify-center min-h-screen p-4">
+            <div class="bg-white rounded-lg p-8 w-full max-w-md shadow-2xl fade-in">
+                <div class="text-center mb-6">
+                    <i class="fas fa-shield-alt text-4xl mb-4 text-key-color"></i>
+                    <h2 class="text-2xl font-bold text-gray-800">システムログイン</h2>
+                    <p class="text-gray-600 mt-2">認証情報を入力してください</p>
+                </div>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-2 text-gray-700">ユーザー種別</label>
+                        <select id="userType" class="w-full p-3 border border-gray-300 rounded-lg large-text focus:ring-2 focus-key-color">
+                            <option value="inspector">検針員</option>
+                            <option value="manager">管理者</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-2 text-gray-700">ユーザー名</label>
+                        <input type="text" id="username" class="w-full p-3 border border-gray-300 rounded-lg large-text focus:ring-2 focus-key-color" placeholder="ユーザー名を入力">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-2 text-gray-700">パスワード</label>
+                        <input type="password" id="password" class="w-full p-3 border border-gray-300 rounded-lg large-text focus:ring-2 focus-key-color" placeholder="パスワードを入力">
+                    </div>
+                    <div class="flex space-x-2 mt-6">
+                        <button id="loginSubmit" class="flex-1 p-3 rounded-lg large-text transition-colors btn-primary">
+                            <i class="fas fa-sign-in-alt mr-2"></i>ログイン
+                        </button>
+                        <button id="loginCancel" class="flex-1 bg-gray-500 hover:bg-gray-700 text-white p-3 rounded-lg large-text transition-colors">
+                            <i class="fas fa-times mr-2"></i>キャンセル
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- AI Report Modal -->
+    <div id="reportModal" class="fixed inset-0 bg-black bg-opacity-50 modal-overlay z-[1040] hidden no-print">
+        <div class="flex items-center justify-center min-h-screen p-4">
+            <div class="bg-white rounded-lg p-8 w-full max-w-2xl shadow-2xl fade-in">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-2xl font-bold text-gray-800"><i class="fas fa-robot mr-2 text-key-color"></i>AI 分析レポート</h2>
+                    <button id="closeReportModal" class="text-gray-500 hover:text-gray-800 text-2xl">&times;</button>
+                </div>
+                <div id="reportContent" class="h-96 overflow-y-auto p-4 bg-gray-50 rounded-lg report-modal-content">
+                    <!-- Report content will be injected here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- Main Content -->
+    <main class="container mx-auto p-4">
+        <!-- Welcome Screen -->
+        <div id="welcomeScreen" class="text-center py-16">
+            <div class="bg-white rounded-xl shadow-2xl p-12 max-w-2xl mx-auto">
+                <div class="mb-8">
+                    <i class="fas fa-bolt text-8xl mb-6 success-animation text-key-color"></i>
+                    <h2 class="text-4xl font-bold mb-4 text-gray-800">電力メーター検針システム</h2>
+                    <p class="text-xl text-gray-600 mb-8 leading-relaxed">
+                        スマートフォンで簡単にメーター検針を行い、<br>
+                        クラウドでデータを管理できる次世代システムです。
+                    </p>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                    <div class="text-center p-4">
+                        <i class="fas fa-camera text-3xl text-green-600 mb-3"></i>
+                        <h3 class="font-semibold text-gray-800">簡単撮影</h3>
+                        <p class="text-sm text-gray-600">スマートフォンで撮影するだけ</p>
+                    </div>
+                    <div class="text-center p-4">
+                        <i class="fas fa-eye text-3xl text-purple-600 mb-3"></i>
+                        <h3 class="font-semibold text-gray-800">✨ AI自動読取</h3>
+                        <p class="text-sm text-gray-600">Geminiが画像を解析</p>
+                    </div>
+                    <div class="text-center p-4">
+                        <i class="fas fa-chart-line text-3xl mb-3 text-key-color"></i>
+                        <h3 class="font-semibold text-gray-800">✨ AIデータ分析</h3>
+                        <p class="text-sm text-gray-600">Geminiがレポートを生成</p>
+                    </div>
+                </div>
+                <button id="startBtn" class="px-12 py-4 rounded-xl extra-large-text transition-all transform hover:scale-105 shadow-lg btn-primary-gradient">
+                    <i class="fas fa-play mr-3"></i>システム開始
+                </button>
+            </div>
+        </div>
+
+        <!-- Inspector Interface -->
+        <div id="inspectorInterface" class="hidden">
+            <!-- Navigation -->
+            <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <button id="newReadingBtn" class="bg-gradient-to-r from-green-500 to-green-700 hover:from-green-600 hover:to-green-800 text-white p-4 rounded-lg large-text transition-all transform hover:scale-105 shadow-lg">
+                        <i class="fas fa-camera mr-2"></i>新規検針
+                    </button>
+                    <button id="historyBtn" class="p-4 rounded-lg large-text transition-all transform hover:scale-105 shadow-lg btn-primary-gradient">
+                        <i class="fas fa-history mr-2"></i>履歴確認
+                    </button>
+                    <button id="syncBtn" class="bg-gradient-to-r from-purple-500 to-purple-700 hover:from-purple-600 hover:to-purple-800 text-white p-4 rounded-lg large-text transition-all transform hover:scale-105 shadow-lg">
+                        <i class="fas fa-sync mr-2"></i>データ同期
+                    </button>
+                </div>
+            </div>
+
+            <!-- Content Area for Inspector -->
+            <div id="inspectorContent">
+                <!-- New Reading Form will be injected here -->
+            </div>
+        </div>
+
+        <!-- Manager Interface -->
+        <div id="managerInterface" class="hidden">
+            <!-- Dashboard Cards -->
+            <div class="dashboard-grid mb-8">
+                <div class="metric-card" style="background: linear-gradient(135deg, var(--key-color) 0%, var(--key-color-dark) 100%);">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <div class="text-3xl font-bold" id="totalReadings">0</div>
+                            <p class="text-sm opacity-90 mt-1">総検針数</p>
+                        </div>
+                        <i class="fas fa-tachometer-alt text-4xl opacity-80"></i>
+                    </div>
+                </div>
+                <div class="metric-card" style="background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <div class="text-3xl font-bold" id="todayReadings">0</div>
+                            <p class="text-sm opacity-90 mt-1">本日検針数</p>
+                        </div>
+                        <i class="fas fa-calendar-day text-4xl opacity-80"></i>
+                    </div>
+                </div>
+                <div class="metric-card" style="background: linear-gradient(135deg, #ed8936 0%, #dd6b20 100%);">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <div class="text-3xl font-bold" id="pendingReadings">0</div>
+                            <p class="text-sm opacity-90 mt-1">未検針数</p>
+                        </div>
+                        <i class="fas fa-clock text-4xl opacity-80"></i>
+                    </div>
+                </div>
+                <div class="metric-card" style="background: linear-gradient(135deg, #e53e3e 0%, #c53030 100%);">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <div class="text-3xl font-bold" id="alertCount">0</div>
+                            <p class="text-sm opacity-90 mt-1">異常値アラート</p>
+                        </div>
+                        <i class="fas fa-exclamation-triangle text-4xl opacity-80"></i>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Controls -->
+            <div class="bg-white rounded-xl shadow-lg p-6 mb-8">
+                <div class="flex flex-wrap gap-4 items-center">
+                    <div>
+                        <label class="block text-sm font-medium mb-2 text-gray-700">テナント絞り込み</label>
+                        <select id="filterTenant" class="p-3 border border-gray-300 rounded-lg focus:ring-2 focus-key-color">
+                            <option value="">全テナント</option>
+                            <option value="テナントA">テナントA</option>
+                            <option value="テナントB">テナントB</option>
+                            <option value="テナントC">テナントC</option>
+                            <option value="テナントD">テナントD</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-2 text-gray-700">期間選択</label>
+                        <select id="filterPeriod" class="p-3 border border-gray-300 rounded-lg focus:ring-2 focus-key-color">
+                            <option value="today">今日</option>
+                            <option value="week">今週</option>
+                            <option value="month" selected>今月</option>
+                            <option value="all">全期間</option>
+                        </select>
+                    </div>
+                    <div class="ml-auto flex flex-wrap gap-3">
+                        <button id="generateReportBtn" class="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-lg transition-colors shadow-lg">
+                            <i class="fas fa-robot mr-2"></i>✨ AIによる分析レポート
+                        </button>
+                        <button id="refreshData" class="px-6 py-3 rounded-lg transition-colors shadow-lg btn-primary">
+                            <i class="fas fa-sync mr-2"></i>データ更新
+                        </button>
+                        <button id="exportCsv" class="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg transition-colors shadow-lg">
+                            <i class="fas fa-download mr-2"></i>CSV出力
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Chart -->
+            <div class="bg-white rounded-xl shadow-lg p-8 mb-8">
+                <h3 class="text-2xl font-bold mb-6 text-gray-800">
+                    <i class="fas fa-chart-area mr-3 text-key-color"></i>使用量推移グラフ
+                </h3>
+                <div class="chart-container">
+                    <canvas id="usageChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Alert Panel -->
+            <div id="alertPanel" class="bg-white rounded-xl shadow-lg p-8 mb-8 hidden">
+                <h3 class="text-2xl font-bold mb-6 text-gray-800">
+                    <i class="fas fa-exclamation-triangle mr-3 text-red-600"></i>アラート・異常値
+                </h3>
+                <div id="alertList" class="space-y-4">
+                    <!-- アラートがここに表示される -->
+                </div>
+            </div>
+
+            <!-- Data Table -->
+            <div class="bg-white rounded-xl shadow-lg p-8">
+                <h3 class="text-2xl font-bold mb-6 text-gray-800">
+                    <i class="fas fa-table mr-3 text-key-color"></i>検針データ一覧
+                </h3>
+                <div class="data-table">
+                    <table id="dataTable" class="min-w-full table-auto">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-6 py-4 text-left text-sm font-medium text-gray-700">日時</th>
+                                <th class="px-6 py-4 text-left text-sm font-medium text-gray-700">テナント</th>
+                                <th class="px-6 py-4 text-left text-sm font-medium text-gray-700">メーカー</th>
+                                <th class="px-6 py-4 text-left text-sm font-medium text-gray-700">製造番号</th>
+                                <th class="px-6 py-4 text-right text-sm font-medium text-gray-700">使用量(kWh)</th>
+                                <th class="px-6 py-4 text-right text-sm font-medium text-gray-700">前月比</th>
+                                <th class="px-6 py-4 text-left text-sm font-medium text-gray-700">検針員</th>
+                                <th class="px-6 py-4 text-left text-sm font-medium text-gray-700">ステータス</th>
+                            </tr>
+                        </thead>
+                        <tbody id="dataTableBody" class="divide-y divide-gray-200">
+                            <!-- データがここに表示される -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Success Modal -->
+    <div id="successModal" class="fixed inset-0 bg-black bg-opacity-50 modal-overlay z-[1040] hidden no-print">
+        <div class="flex items-center justify-center min-h-screen p-4">
+            <div class="bg-white rounded-xl p-8 w-full max-w-md text-center shadow-2xl fade-in">
+                <div class="success-animation">
+                    <i class="fas fa-check-circle text-8xl text-green-500 mb-6"></i>
+                </div>
+                <h2 class="text-2xl font-bold mb-4 text-gray-800">送信完了</h2>
+                <p class="text-gray-600 mb-8 text-lg">検針データが正常にクラウドに送信されました。</p>
+                <button id="successOk" class="px-8 py-3 rounded-lg large-text transition-colors shadow-lg btn-primary">
+                    <i class="fas fa-check mr-2"></i>OK
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification -->
+    <div id="notification" class="notification"></div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- STATE MANAGEMENT ---
+            let currentUser = null;
+            let currentStep = 1;
+            let selectedTenant = null;
+            let capturedImage = null;
+            let capturedImageURL = null;
+            let capturedImageBase64 = null;
+            let ocrData = null;
+            let readingData = [];
+            let usageChart = null;
+
+            // --- MOCK DATA ---
+            const meterManufacturers = ['東光電気', '大崎電気', '三菱電機', 'パナソニック', '東芝', '日置電機', 'その他'];
+            function generateMockData() {
+                const tenants = ['テナントA', 'テナントB', 'テナントC', 'テナントD'];
+                const inspectors = ['田中', '鈴木'];
+                const now = new Date();
+                let mock = [];
+
+                for (let i = 0; i < 50; i++) {
+                    const date = new Date(now.getTime() - Math.random() * 60 * 24 * 60 * 60 * 1000); // Last 60 days
+                    const tenant = tenants[Math.floor(Math.random() * tenants.length)];
+                    const lastMonthUsage = Math.floor(1000 + Math.random() * 2000);
+                    const usage = Math.floor(lastMonthUsage * (0.8 + Math.random() * 0.4)); // Fluctuate around last month
+                    
+                    mock.push({
+                        id: `R${Date.now()}${i}`,
+                        timestamp: date.toISOString(),
+                        tenant: tenant,
+                        manufacturer: meterManufacturers[Math.floor(Math.random() * (meterManufacturers.length - 1))],
+                        serial: `${Math.floor(1000 + Math.random() * 9000)}-${Math.floor(1000 + Math.random() * 9000)}`,
+                        usage: usage,
+                        lastMonthUsage: lastMonthUsage,
+                        inspector: inspectors[Math.floor(Math.random() * inspectors.length)],
+                        remarks: Math.random() > 0.8 ? 'メーターに傷あり' : '',
+                        status: 'synced',
+                        imageURL: `https://placehold.co/400x300/e2e8f0/333?text=Meter+Image+${i}`
+                    });
+                }
+                readingData = mock;
+            }
+
+            // --- DOM Elements ---
+            const dom = {
+                loginBtn: document.getElementById('loginBtn'),
+                logoutBtn: document.getElementById('logoutBtn'),
+                startBtn: document.getElementById('startBtn'),
+                loginModal: document.getElementById('loginModal'),
+                loginSubmit: document.getElementById('loginSubmit'),
+                loginCancel: document.getElementById('loginCancel'),
+                usernameInput: document.getElementById('username'),
+                passwordInput: document.getElementById('password'),
+                userTypeInput: document.getElementById('userType'),
+                welcomeScreen: document.getElementById('welcomeScreen'),
+                inspectorInterface: document.getElementById('inspectorInterface'),
+                managerInterface: document.getElementById('managerInterface'),
+                userInfo: document.getElementById('userInfo'),
+                currentUserName: document.getElementById('currentUserName'),
+                inspectorContent: document.getElementById('inspectorContent'),
+                newReadingBtn: document.getElementById('newReadingBtn'),
+                historyBtn: document.getElementById('historyBtn'),
+                syncBtn: document.getElementById('syncBtn'),
+                successModal: document.getElementById('successModal'),
+                successOk: document.getElementById('successOk'),
+                notification: document.getElementById('notification'),
+                // Manager UI
+                totalReadings: document.getElementById('totalReadings'),
+                todayReadings: document.getElementById('todayReadings'),
+                pendingReadings: document.getElementById('pendingReadings'),
+                alertCount: document.getElementById('alertCount'),
+                filterTenant: document.getElementById('filterTenant'),
+                filterPeriod: document.getElementById('filterPeriod'),
+                refreshData: document.getElementById('refreshData'),
+                exportCsv: document.getElementById('exportCsv'),
+                usageChartCanvas: document.getElementById('usageChart'),
+                alertPanel: document.getElementById('alertPanel'),
+                alertList: document.getElementById('alertList'),
+                dataTableBody: document.getElementById('dataTableBody'),
+                generateReportBtn: document.getElementById('generateReportBtn'),
+                reportModal: document.getElementById('reportModal'),
+                reportContent: document.getElementById('reportContent'),
+                closeReportModal: document.getElementById('closeReportModal'),
+            };
+
+            // --- NOTIFICATION SYSTEM ---
+            function showNotification(message, type = 'info', duration = 3000) {
+                dom.notification.textContent = message;
+                dom.notification.className = `notification ${type}`;
+                dom.notification.classList.add('show');
+                setTimeout(() => {
+                    dom.notification.classList.remove('show');
+                }, duration);
+            }
+
+            // --- AUTHENTICATION ---
+            function showLoginModal() { dom.loginModal.classList.remove('hidden'); }
+            function hideLoginModal() { dom.loginModal.classList.add('hidden'); }
+
+            function handleLogin() {
+                const username = dom.usernameInput.value.trim();
+                const password = dom.passwordInput.value.trim();
+                const userType = dom.userTypeInput.value;
+
+                if (username && password) {
+                    currentUser = { name: username, type: userType };
+                    updateUIForUser();
+                    hideLoginModal();
+                    showNotification(`${username}さん、ようこそ！`, 'success');
+                } else {
+                    showNotification('ユーザー名とパスワードを入力してください。', 'error');
+                }
+            }
+
+            function handleLogout() {
+                currentUser = null;
+                updateUIForUser();
+                showNotification('ログアウトしました。', 'info');
+            }
+
+            function updateUIForUser() {
+                if (currentUser) {
+                    dom.loginBtn.classList.add('hidden');
+                    dom.logoutBtn.classList.remove('hidden');
+                    dom.userInfo.classList.remove('hidden');
+                    dom.userInfo.classList.add('flex');
+                    dom.currentUserName.textContent = currentUser.name;
+                    dom.welcomeScreen.classList.add('hidden');
+                    if (currentUser.type === 'inspector') {
+                        dom.inspectorInterface.classList.remove('hidden');
+                        dom.managerInterface.classList.add('hidden');
+                        showNewReadingForm();
+                    } else {
+                        dom.inspectorInterface.classList.add('hidden');
+                        dom.managerInterface.classList.remove('hidden');
+                        updateManagerDashboard();
+                    }
+                } else {
+                    dom.loginBtn.classList.remove('hidden');
+                    dom.logoutBtn.classList.add('hidden');
+                    dom.userInfo.classList.add('hidden');
+                    dom.welcomeScreen.classList.remove('hidden');
+                    dom.inspectorInterface.classList.add('hidden');
+                    dom.managerInterface.classList.add('hidden');
+                }
+            }
+
+            // --- INSPECTOR: NEW READING WORKFLOW ---
+            
+            function resetReadingState() {
+                currentStep = 1;
+                selectedTenant = null;
+                capturedImage = null;
+                capturedImageURL = null;
+                capturedImageBase64 = null;
+                ocrData = null;
+            }
+
+            function showNewReadingForm() {
+                resetReadingState();
+                dom.inspectorContent.innerHTML = `
+                    <div id="newReadingContainer" class="fade-in">
+                        <div id="progressIndicator" class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                            <div class="step-indicator">
+                                <div class="step active" data-step="1"><div class="line"></div><div class="circle">1</div><span class="text-sm font-medium">テナント選択</span></div>
+                                <div class="step" data-step="2"><div class="line"></div><div class="circle">2</div><span class="text-sm font-medium">メーター撮影</span></div>
+                                <div class="step" data-step="3"><div class="line"></div><div class="circle">3</div><span class="text-sm font-medium">✨ AI読取</span></div>
+                                <div class="step" data-step="4"><div class="line"></div><div class="circle">4</div><span class="text-sm font-medium">データ送信</span></div>
+                            </div>
+                        </div>
+                        <div id="newReadingForm" class="bg-white rounded-xl shadow-lg p-8 mb-6">
+                            <h3 class="text-2xl font-bold mb-6 text-gray-800"><i class="fas fa-camera mr-3 text-key-color"></i>メーター検針フォーム</h3>
+                            <div id="step1" class="space-y-6">
+                                <h4 class="text-xl font-semibold text-gray-700 mb-4">ステップ1: テナント選択</h4>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="tenantGrid">
+                                    <div class="tenant-card p-4" data-tenant="テナントA"><div class="flex items-center space-x-3"><i class="fas fa-building text-blue-600 text-2xl"></i><div><h5 class="font-semibold text-gray-800">テナントA</h5><p class="text-sm text-gray-600">1F 事務所</p></div></div></div>
+                                    <div class="tenant-card p-4" data-tenant="テナントB"><div class="flex items-center space-x-3"><i class="fas fa-store text-green-600 text-2xl"></i><div><h5 class="font-semibold text-gray-800">テナントB</h5><p class="text-sm text-gray-600">2F 店舗</p></div></div></div>
+                                    <div class="tenant-card p-4" data-tenant="テナントC"><div class="flex items-center space-x-3"><i class="fas fa-industry text-purple-600 text-2xl"></i><div><h5 class="font-semibold text-gray-800">テナントC</h5><p class="text-sm text-gray-600">3F 工場</p></div></div></div>
+                                    <div class="tenant-card p-4" data-tenant="テナントD"><div class="flex items-center space-x-3"><i class="fas fa-home text-orange-600 text-2xl"></i><div><h5 class="font-semibold text-gray-800">テナントD</h5><p class="text-sm text-gray-600">4F 住宅</p></div></div></div>
+                                </div>
+                                <button id="nextStep1" class="w-full p-4 rounded-lg large-text transition-colors shadow-lg disabled:bg-gray-400 disabled:cursor-not-allowed btn-primary" disabled><i class="fas fa-arrow-right mr-2"></i>次のステップへ</button>
+                            </div>
+                            <div id="step2" class="space-y-6 hidden">
+                                <h4 class="text-xl font-semibold text-gray-700 mb-4">ステップ2: メーター撮影</h4>
+                                <div class="text-center">
+                                    <div class="camera-preview rounded-lg" id="cameraPreview">
+                                        <div class="text-center text-gray-500"><i class="fas fa-camera text-6xl text-gray-400 mb-4"></i><p class="text-lg">メーターをカメラで撮影</p><p class="text-sm text-gray-400 mt-2">数字がはっきり見えるように</p></div>
+                                    </div>
+                                    <input type="file" id="fileInput" accept="image/*" capture="environment" class="hidden">
+                                    <div class="camera-controls">
+                                        <button id="captureBtn" class="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg large-text transition-colors shadow-lg"><i class="fas fa-camera mr-2"></i>撮影開始</button>
+                                        <button id="retakeBtn" class="bg-yellow-600 hover:bg-yellow-700 text-white px-6 py-3 rounded-lg large-text hidden transition-colors shadow-lg"><i class="fas fa-redo mr-2"></i>再撮影</button>
+                                    </div>
+                                </div>
+                                <div class="flex space-x-4">
+                                    <button id="backStep1" class="flex-1 bg-gray-500 hover:bg-gray-600 text-white p-4 rounded-lg large-text transition-colors"><i class="fas fa-arrow-left mr-2"></i>戻る</button>
+                                    <button id="nextStep2" class="flex-1 p-4 rounded-lg large-text transition-colors shadow-lg disabled:bg-gray-400 disabled:cursor-not-allowed btn-primary" disabled><i class="fas fa-eye mr-2"></i>✨ AI読取開始</button>
+                                </div>
+                            </div>
+                            <div id="step3" class="space-y-6 hidden">
+                                <h4 class="text-xl font-semibold text-gray-700 mb-4">ステップ3: ✨ AI自動読取</h4>
+                                <div id="ocrStatus" class="bg-yellow-50 border-2 border-yellow-200 rounded-lg p-6 text-center">
+                                    <div class="loading-spinner inline-block"><i class="fas fa-spinner text-3xl text-yellow-600 mb-4"></i></div>
+                                    <p class="text-yellow-800 text-lg font-semibold">Gemini AIが画像解析中...</p>
+                                    <p class="text-yellow-600 text-sm mt-2">メーターの数値を自動読み取りしています</p>
+                                </div>
+                                <div id="ocrResults" class="hidden ocr-result-animation"></div>
+                                <div class="flex space-x-4">
+                                    <button id="backStep2" class="flex-1 bg-gray-500 hover:bg-gray-600 text-white p-4 rounded-lg large-text transition-colors"><i class="fas fa-arrow-left mr-2"></i>戻る</button>
+                                    <button id="nextStep3" class="flex-1 p-4 rounded-lg large-text hidden transition-colors shadow-lg btn-primary"><i class="fas fa-check mr-2"></i>確認・送信へ</button>
+                                </div>
+                            </div>
+                            <div id="step4" class="space-y-6 hidden">
+                                <h4 class="text-xl font-semibold text-gray-700 mb-4">ステップ4: データ確認・送信</h4>
+                                <div id="dataConfirmation" class="p-6 rounded-lg" style="background-color: var(--key-color-extralight); border: 2px solid var(--key-color-border);"></div>
+                                <div>
+                                    <label class="block text-sm font-medium mb-2 text-gray-700">備考（任意）</label>
+                                    <textarea id="remarks" class="w-full p-4 border border-gray-300 rounded-lg large-text focus:ring-2 focus-key-color" rows="3" placeholder="特記事項があれば入力してください"></textarea>
+                                </div>
+                                <div class="flex space-x-4">
+                                    <button id="backStep3" class="flex-1 bg-gray-500 hover:bg-gray-600 text-white p-4 rounded-lg large-text transition-colors"><i class="fas fa-arrow-left mr-2"></i>戻る</button>
+                                    <button id="submitReading" class="flex-1 bg-green-600 hover:bg-green-700 text-white p-4 rounded-lg large-text transition-colors shadow-lg"><i class="fas fa-paper-plane mr-2"></i>データ送信</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                addStepEventListeners();
+                goToStep(1);
+            }
+
+            function addStepEventListeners() {
+                // Step 1
+                document.getElementById('tenantGrid').addEventListener('click', (e) => {
+                    const card = e.target.closest('.tenant-card');
+                    if (card) {
+                        document.querySelectorAll('.tenant-card').forEach(c => c.classList.remove('selected'));
+                        card.classList.add('selected');
+                        selectedTenant = card.dataset.tenant;
+                        document.getElementById('nextStep1').disabled = false;
+                    }
+                });
+                document.getElementById('nextStep1').addEventListener('click', () => goToStep(2));
+
+                // Step 2
+                document.getElementById('captureBtn').addEventListener('click', () => document.getElementById('fileInput').click());
+                document.getElementById('retakeBtn').addEventListener('click', () => document.getElementById('fileInput').click());
+                document.getElementById('fileInput').addEventListener('change', handleFileSelect);
+                document.getElementById('backStep1').addEventListener('click', () => goToStep(1));
+                document.getElementById('nextStep2').addEventListener('click', () => {
+                    goToStep(3);
+                    runOcrProcess();
+                });
+
+                // Step 3
+                document.getElementById('backStep2').addEventListener('click', () => goToStep(2));
+                document.getElementById('nextStep3').addEventListener('click', () => {
+                    const correctedManufacturer = document.getElementById('manufacturerSelect').value;
+                    const correctedSerial = document.getElementById('serialInput').value;
+                    const correctedUsage = document.getElementById('usageInput').value;
+                    ocrData.manufacturer = correctedManufacturer;
+                    ocrData.serial = correctedSerial;
+                    ocrData.usage = parseFloat(correctedUsage) || 0;
+                    goToStep(4);
+                });
+
+                // Step 4
+                document.getElementById('backStep3').addEventListener('click', () => goToStep(3));
+                document.getElementById('submitReading').addEventListener('click', submitFinalData);
+            }
+
+            function goToStep(stepNumber) {
+                currentStep = stepNumber;
+                document.querySelectorAll('#newReadingForm > div[id^="step"]').forEach(stepDiv => {
+                    stepDiv.classList.add('hidden');
+                });
+                document.getElementById(`step${stepNumber}`).classList.remove('hidden');
+
+                const steps = document.querySelectorAll('.step-indicator .step');
+                steps.forEach((step, index) => {
+                    const stepIndex = index + 1;
+                    step.classList.remove('active', 'completed');
+                    if (stepIndex < stepNumber) {
+                        step.classList.add('completed');
+                    } else if (stepIndex === stepNumber) {
+                        step.classList.add('active');
+                    }
+                });
+                
+                if (stepNumber === 4) {
+                    renderConfirmationData();
+                }
+            }
+
+            function fileToBase64(file) {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.readAsDataURL(file);
+                    reader.onload = () => {
+                        // Return only the base64 part
+                        resolve(reader.result.split(',')[1]);
+                    };
+                    reader.onerror = error => reject(error);
+                });
+            }
+
+            async function handleFileSelect(event) {
+                const file = event.target.files[0];
+                if (file) {
+                    capturedImage = file;
+                    capturedImageURL = URL.createObjectURL(file);
+                    
+                    const preview = document.getElementById('cameraPreview');
+                    preview.innerHTML = `<img src="${capturedImageURL}" alt="メーター画像" />`;
+                    document.getElementById('captureBtn').classList.add('hidden');
+                    document.getElementById('retakeBtn').classList.remove('hidden');
+                    document.getElementById('nextStep2').disabled = false;
+
+                    try {
+                        capturedImageBase64 = await fileToBase64(file);
+                    } catch (error) {
+                        console.error("Error converting file to base64:", error);
+                        showNotification('画像の処理中にエラーが発生しました。', 'error');
+                        capturedImageBase64 = null;
+                        document.getElementById('nextStep2').disabled = true;
+                    }
+                }
+            }
+
+            async function runOcrProcess() {
+                document.getElementById('ocrStatus').classList.remove('hidden');
+                document.getElementById('ocrResults').classList.add('hidden');
+                document.getElementById('nextStep3').classList.add('hidden');
+
+                if (!capturedImageBase64) {
+                    showNotification('画像データがありません。撮影からやり直してください。', 'error');
+                    goToStep(2);
+                    return;
+                }
+
+                try {
+                    const result = await getOcrFromGemini(capturedImageBase64);
+                    ocrData = result;
+                    renderOcrResults();
+                    document.getElementById('ocrStatus').classList.add('hidden');
+                    document.getElementById('ocrResults').classList.remove('hidden');
+                    document.getElementById('nextStep3').classList.remove('hidden');
+                } catch (error) {
+                    console.error("Gemini OCR Error:", error);
+                    showNotification('AIによる画像解析に失敗しました。手動で入力してください。', 'error');
+                    ocrData = { manufacturer: null, serial: null, usage: null }; // Provide empty object for manual input
+                    renderOcrResults(); // Render empty form for manual input
+                    document.getElementById('ocrStatus').classList.add('hidden');
+                    document.getElementById('ocrResults').classList.remove('hidden');
+                    document.getElementById('nextStep3').classList.remove('hidden');
+                }
+            }
+            
+            function renderOcrResults() {
+                const resultsContainer = document.getElementById('ocrResults');
+                const manufacturerOptions = meterManufacturers.map(m =>
+                    `<option value="${m}" ${m === (ocrData?.manufacturer || 'その他') ? 'selected' : ''}>${m}</option>`
+                ).join('');
+
+                resultsContainer.innerHTML = `
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+                        <div>
+                            <p class="text-sm font-medium text-gray-600 mb-2">撮影画像</p>
+                            <img src="${capturedImageURL}" class="rounded-lg shadow-md border meter-image mx-auto">
+                        </div>
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium mb-1 text-gray-700">メーカー (AI読取結果・修正可)</label>
+                                <select id="manufacturerSelect" class="w-full p-3 border border-gray-300 rounded-lg large-text focus:ring-2 focus-key-color">${manufacturerOptions}</select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium mb-1 text-gray-700">製造番号 (AI読取結果・修正可)</label>
+                                <input type="text" id="serialInput" value="${ocrData?.serial || ''}" class="w-full p-3 border border-gray-300 rounded-lg large-text focus:ring-2 focus-key-color" placeholder="製造番号を入力">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium mb-1 text-gray-700">使用量(kWh) (AI読取結果・修正可)</label>
+                                <input type="number" id="usageInput" value="${ocrData?.usage || ''}" class="w-full p-3 border border-gray-300 rounded-lg large-text focus:ring-2 focus-key-color" placeholder="使用量を入力">
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            function renderConfirmationData() {
+                const confirmationContainer = document.getElementById('dataConfirmation');
+                confirmationContainer.innerHTML = `
+                    <h5 class="text-lg font-bold mb-4 text-gray-800">以下の内容で送信します</h5>
+                    <div class="space-y-3">
+                        <div class="flex justify-between"><span class="font-semibold text-gray-600">テナント:</span> <span class="font-bold text-gray-900">${selectedTenant}</span></div>
+                        <div class="flex justify-between"><span class="font-semibold text-gray-600">メーカー:</span> <span class="font-bold text-gray-900">${ocrData.manufacturer}</span></div>
+                        <div class="flex justify-between"><span class="font-semibold text-gray-600">製造番号:</span> <span class="font-bold text-gray-900">${ocrData.serial}</span></div>
+                        <div class="flex justify-between text-xl"><span class="font-semibold text-gray-600">使用量(kWh):</span> <span class="font-bold text-key-color">${ocrData.usage.toLocaleString()}</span></div>
+                        <div class="mt-4">
+                            <p class="text-sm font-medium text-gray-600 mb-2">撮影画像</p>
+                            <img src="${capturedImageURL}" class="rounded-lg shadow-md border meter-image">
+                        </div>
+                    </div>
+                `;
+            }
+
+            function submitFinalData() {
+                const newReading = {
+                    id: `R${Date.now()}`,
+                    timestamp: new Date().toISOString(),
+                    tenant: selectedTenant,
+                    manufacturer: ocrData.manufacturer,
+                    serial: ocrData.serial,
+                    usage: ocrData.usage,
+                    lastMonthUsage: Math.floor(ocrData.usage * (0.8 + Math.random() * 0.4)),
+                    inspector: currentUser.name,
+                    remarks: document.getElementById('remarks').value,
+                    status: 'pending',
+                    imageURL: capturedImageURL
+                };
+
+                readingData.unshift(newReading);
+                dom.successModal.classList.remove('hidden');
+            }
+
+            // --- INSPECTOR: HISTORY & SYNC ---
+            function showHistory() {
+                dom.inspectorContent.innerHTML = `
+                    <div id="readingHistory" class="bg-white rounded-xl shadow-lg p-8 fade-in">
+                        <h3 class="text-2xl font-bold mb-6 text-gray-800"><i class="fas fa-history mr-3 text-key-color"></i>検針履歴</h3>
+                        <div id="historyList" class="space-y-4 max-h-[60vh] overflow-y-auto pr-2"></div>
+                    </div>
+                `;
+                renderHistoryList();
+            }
+            
+            function renderHistoryList() {
+                const listEl = document.getElementById('historyList');
+                const inspectorReadings = readingData.filter(r => r.inspector === currentUser.name);
+
+                if (inspectorReadings.length === 0) {
+                    listEl.innerHTML = `<p class="text-center text-gray-500 py-8">検針履歴はありません。</p>`;
+                    return;
+                }
+
+                listEl.innerHTML = inspectorReadings.map(r => `
+                    <div class="history-item bg-gray-50 rounded-lg p-4 border border-gray-200 flex items-center justify-between">
+                        <div class="flex items-center space-x-4">
+                            <img src="${r.imageURL}" class="w-16 h-16 rounded-md object-cover">
+                            <div>
+                                <p class="font-bold text-lg text-gray-800">${r.tenant}</p>
+                                <p class="text-sm text-gray-600">${new Date(r.timestamp).toLocaleString('ja-JP')}</p>
+                                <p class="text-sm text-gray-500">使用量: <span class="font-semibold text-key-color">${r.usage.toLocaleString()} kWh</span></p>
+                            </div>
+                        </div>
+                        <span class="status-badge ${r.status === 'synced' ? 'status-synced' : 'status-pending'}">
+                            <i class="fas ${r.status === 'synced' ? 'fa-check-circle' : 'fa-hourglass-half'} mr-2"></i>
+                            ${r.status === 'synced' ? '同期済み' : '同期待ち'}
+                        </span>
+                    </div>
+                `).join('');
+            }
+
+            function handleSync() {
+                const pendingCount = readingData.filter(r => r.status === 'pending' && r.inspector === currentUser.name).length;
+                if (pendingCount === 0) {
+                    showNotification('同期するデータはありません。', 'info');
+                    return;
+                }
+                
+                showNotification(`データを同期中... (${pendingCount}件)`, 'info', 2000);
+                setTimeout(() => {
+                    readingData.forEach(r => {
+                        if (r.status === 'pending' && r.inspector === currentUser.name) {
+                            r.status = 'synced';
+                        }
+                    });
+                    showNotification('データの同期が完了しました。', 'success');
+                    if (document.getElementById('readingHistory')) {
+                        renderHistoryList();
+                    }
+                }, 2500);
+            }
+
+            // --- MANAGER: DASHBOARD & AI REPORT ---
+            function updateManagerDashboard() {
+                const filteredData = getFilteredData();
+                const now = new Date();
+                const todayStr = now.toISOString().slice(0, 10);
+                dom.totalReadings.textContent = readingData.length.toLocaleString();
+                dom.todayReadings.textContent = readingData.filter(r => r.timestamp.startsWith(todayStr)).length.toLocaleString();
+                dom.pendingReadings.textContent = readingData.filter(r => r.status === 'pending').length.toLocaleString();
+                renderDataTable(filteredData);
+                updateChart(filteredData);
+                updateAlerts(filteredData);
+            }
+            
+            function getFilteredData() {
+                const tenant = dom.filterTenant.value;
+                const period = dom.filterPeriod.value;
+                const now = new Date();
+                
+                let filtered = readingData;
+
+                if (tenant) {
+                    filtered = filtered.filter(r => r.tenant === tenant);
+                }
+
+                if (period !== 'all') {
+                    let startDate = new Date();
+                    if (period === 'today') {
+                        startDate.setHours(0, 0, 0, 0);
+                    } else if (period === 'week') {
+                        startDate.setDate(now.getDate() - (now.getDay() || 7) + 1);
+                        startDate.setHours(0, 0, 0, 0);
+                    } else if (period === 'month') {
+                        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                    }
+                    filtered = filtered.filter(r => new Date(r.timestamp) >= startDate);
+                }
+                
+                return filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+            }
+
+            function renderDataTable(data) {
+                if (data.length === 0) {
+                    dom.dataTableBody.innerHTML = `<tr><td colspan="8" class="text-center py-10 text-gray-500">表示するデータがありません。</td></tr>`;
+                    return;
+                }
+                dom.dataTableBody.innerHTML = data.map(r => {
+                    const usageDiff = r.usage - r.lastMonthUsage;
+                    const diffClass = usageDiff >= 0 ? 'text-red-500' : 'text-green-500';
+                    const diffIcon = usageDiff >= 0 ? 'fa-arrow-up' : 'fa-arrow-down';
+                    
+                    return `
+                        <tr class="hover:bg-gray-50">
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">${new Date(r.timestamp).toLocaleString('ja-JP')}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-800">${r.tenant}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">${r.manufacturer}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">${r.serial}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-right text-key-color">${r.usage.toLocaleString()}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-right ${diffClass}">
+                                <i class="fas ${diffIcon} mr-1"></i>${Math.abs(usageDiff).toLocaleString()}
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">${r.inspector}</td>
+                            <td class="px-6 py-4 whitespace-nowrap"><span class="status-badge ${r.status === 'synced' ? 'status-synced' : 'status-pending'}">${r.status === 'synced' ? '同期済み' : '同期待ち'}</span></td>
+                        </tr>
+                    `;
+                }).join('');
+            }
+            
+            function updateAlerts(data) {
+                const alerts = [];
+                data.forEach(r => {
+                    if (r.lastMonthUsage > 0) {
+                        const percentageDiff = (r.usage - r.lastMonthUsage) / r.lastMonthUsage;
+                        if (Math.abs(percentageDiff) > 0.5) {
+                            alerts.push({ ...r, change: percentageDiff });
+                        }
+                    }
+                });
+                
+                dom.alertCount.textContent = alerts.length;
+                if (alerts.length > 0) {
+                    dom.alertPanel.classList.remove('hidden');
+                    dom.alertList.innerHTML = alerts.map(a => `
+                        <div class="alert-item p-4 rounded-lg flex justify-between items-center">
+                            <div>
+                                <p class="font-bold text-red-800">${a.tenant} - 使用量が前月比${(a.change * 100).toFixed(0)}% ${a.change > 0 ? '増加' : '減少'}</p>
+                                <p class="text-sm text-gray-600">${new Date(a.timestamp).toLocaleDateString()}: ${a.lastMonthUsage.toLocaleString()} kWh → ${a.usage.toLocaleString()} kWh</p>
+                            </div>
+                            <i class="fas fa-exclamation-circle text-red-600 text-xl"></i>
+                        </div>
+                    `).join('');
+                } else {
+                    dom.alertPanel.classList.add('hidden');
+                }
+            }
+
+            function updateChart(data) {
+                if (usageChart) {
+                    usageChart.destroy();
+                }
+                const tenantData = {};
+                data.forEach(r => {
+                    if (!tenantData[r.tenant]) tenantData[r.tenant] = [];
+                    tenantData[r.tenant].push({x: new Date(r.timestamp), y: r.usage});
+                });
+                const datasets = Object.keys(tenantData).map((tenant, index) => {
+                    const colors = ['#aa0000', '#10b981', '#8b5cf6', '#f59e0b', '#ec4899', '#6366f1', '#14b8a6', '#f97316'];
+                    const color = colors[index % colors.length];
+                    return {
+                        label: tenant,
+                        data: tenantData[tenant].sort((a,b) => a.x - b.x),
+                        borderColor: color,
+                        backgroundColor: `${color}33`,
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 4,
+                        pointBackgroundColor: color,
+                    };
+                });
+                usageChart = new Chart(dom.usageChartCanvas.getContext('2d'), {
+                    type: 'line', data: { datasets },
+                    options: {
+                        responsive: true, maintainAspectRatio: false,
+                        scales: {
+                            x: { type: 'time', time: { unit: 'day', tooltipFormat: 'yyyy/MM/dd HH:mm', displayFormats: { day: 'MM/dd' } }, title: { display: true, text: '日付' } },
+                            y: { title: { display: true, text: '使用量 (kWh)' }, beginAtZero: true }
+                        },
+                        plugins: { legend: { position: 'top' }, tooltip: { mode: 'index', intersect: false } },
+                        interaction: { mode: 'nearest', axis: 'x', intersect: false }
+                    }
+                });
+            }
+            
+            function exportToCsv() {
+                const data = getFilteredData();
+                if (data.length === 0) {
+                    showNotification('エクスポートするデータがありません。', 'error');
+                    return;
+                }
+                const headers = ['ID', '日時', 'テナント', 'メーカー', '製造番号', '使用量(kWh)', '前月使用量', '検針員', '備考', 'ステータス'];
+                const rows = data.map(r => [r.id, new Date(r.timestamp).toLocaleString('ja-JP'), r.tenant, r.manufacturer, r.serial, r.usage, r.lastMonthUsage, r.inspector, `"${r.remarks.replace(/"/g, '""')}"`, r.status].join(','));
+                const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows].join('\n');
+                const encodedUri = encodeURI(csvContent);
+                const link = document.createElement("a");
+                link.setAttribute("href", encodedUri);
+                link.setAttribute("download", `検針データ_${new Date().toISOString().slice(0,10)}.csv`);
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                showNotification('CSVファイルをエクスポートしました。', 'success');
+            }
+            
+            async function generateAiReport() {
+                const data = getFilteredData();
+                if (data.length === 0) {
+                    showNotification('分析対象のデータがありません。', 'error');
+                    return;
+                }
+                dom.reportModal.classList.remove('hidden');
+                dom.reportContent.innerHTML = `<div class="flex justify-center items-center h-full"><div class="loading-spinner"><i class="fas fa-spinner text-3xl text-key-color"></i></div><p class="ml-4 text-gray-600">AIがレポートを生成中です...</p></div>`;
+                
+                const periodText = dom.filterPeriod.options[dom.filterPeriod.selectedIndex].text;
+                const tenantText = dom.filterTenant.value || "全テナント";
+                const prompt = `あなたは優秀なエネルギーコンサルタントです。以下の電力検針データを分析し、管理者向けの日本語のレポートを作成してください。
+
+分析対象:
+- 期間: ${periodText}
+- テナント: ${tenantText}
+
+データ (JSON):
+${JSON.stringify(data.slice(0, 50), null, 2)}
+
+レポートに含める内容:
+1.  **総括**: 全体的な電力消費の傾向を簡潔にまとめてください。
+2.  **主要テナント**: 最も消費量が多い、または変動が激しいテナントを特定し、その理由を推測してください。
+3.  **異常検知**: 特に注意すべき異常な増減（例: 前月比50%以上の変動）があった検針データを指摘してください。
+4.  **提案**: 管理者が次にとるべきアクション（例: 特定テナントへの確認、設備の点検推奨など）を具体的に提案してください。
+
+レポートはマークダウン形式で、見出しや箇条書きを使って分かりやすく記述してください。`;
+
+                try {
+                    const reportText = await getTextFromGemini(prompt);
+                    dom.reportContent.innerHTML = reportText.replace(/\n/g, '<br>'); // Basic formatting
+                } catch (error) {
+                    console.error("AI Report Error:", error);
+                    dom.reportContent.innerHTML = `<p class="text-red-500">レポートの生成中にエラーが発生しました。しばらくしてからもう一度お試しください。</p>`;
+                }
+            }
+
+            // --- Gemini API Functions ---
+            async function getOcrFromGemini(base64ImageData) {
+                const apiKey = ""; // APIキーは空のままにします
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+                
+                const payload = {
+                    contents: [{
+                        role: "user",
+                        parts: [
+                            { text: "この電力メーターの画像から、メーカー名、製造番号、そして現在の使用量（kWh）を読み取ってください。結果は指定されたJSON形式で返してください。不明な値はnullにしてください。" },
+                            { inlineData: { mimeType: "image/png", data: base64ImageData } }
+                        ]
+                    }],
+                    generationConfig: {
+                        responseMimeType: "application/json",
+                        responseSchema: {
+                            type: "OBJECT",
+                            properties: {
+                                "manufacturer": { "type": "STRING", "description": "メーターのメーカー名" },
+                                "serial": { "type": "STRING", "description": "メーターの製造番号" },
+                                "usage": { "type": "NUMBER", "description": "現在の使用量(kWh)" }
+                            },
+                            required: ["manufacturer", "serial", "usage"]
+                        }
+                    }
+                };
+
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`API request failed with status ${response.status}`);
+                }
+                const result = await response.json();
+                if (result.candidates && result.candidates.length > 0) {
+                    const text = result.candidates[0].content.parts[0].text;
+                    return JSON.parse(text);
+                } else {
+                    throw new Error("AIからの有効な応答がありませんでした。");
+                }
+            }
+
+            async function getTextFromGemini(prompt) {
+                const apiKey = ""; // APIキーは空のままにします
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+                
+                const payload = {
+                    contents: [{ role: "user", parts: [{ text: prompt }] }]
+                };
+
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`API request failed with status ${response.status}`);
+                }
+                const result = await response.json();
+                 if (result.candidates && result.candidates.length > 0 &&
+                    result.candidates[0].content && result.candidates[0].content.parts &&
+                    result.candidates[0].content.parts.length > 0) {
+                    return result.candidates[0].content.parts[0].text;
+                } else {
+                    console.error("Unexpected API response structure:", result);
+                    throw new Error("AIからの有効なテキスト応答がありませんでした。");
+                }
+            }
+
+
+            // --- EVENT LISTENERS ---
+            dom.loginBtn.addEventListener('click', showLoginModal);
+            dom.logoutBtn.addEventListener('click', handleLogout);
+            dom.startBtn.addEventListener('click', showLoginModal);
+            dom.loginSubmit.addEventListener('click', handleLogin);
+            dom.loginCancel.addEventListener('click', hideLoginModal);
+            
+            dom.newReadingBtn.addEventListener('click', showNewReadingForm);
+            dom.historyBtn.addEventListener('click', showHistory);
+            dom.syncBtn.addEventListener('click', handleSync);
+            dom.successOk.addEventListener('click', () => {
+                dom.successModal.classList.add('hidden');
+                showNewReadingForm();
+            });
+
+            dom.refreshData.addEventListener('click', () => {
+                showNotification('データを更新しました。', 'info');
+                updateManagerDashboard();
+            });
+            dom.exportCsv.addEventListener('click', exportToCsv);
+            dom.filterTenant.addEventListener('change', updateManagerDashboard);
+            dom.filterPeriod.addEventListener('change', updateManagerDashboard);
+            dom.generateReportBtn.addEventListener('click', generateAiReport);
+            dom.closeReportModal.addEventListener('click', () => dom.reportModal.classList.add('hidden'));
+
+            // --- INITIALIZATION ---
+            function init() {
+                generateMockData();
+                updateUIForUser();
+            }
+
+            init();
+        });
+    </script>
+</body>
+</html>
